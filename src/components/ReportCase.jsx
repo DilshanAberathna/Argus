@@ -7,11 +7,31 @@ import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import logo from '../assets/logo.png';
 import Notifications from './Notifications';
 import UserProfileModal from './UserProfileModal';
+import { useAuth } from '../contexts/AuthContext';
 import './ReportCase.css';
 import './History.css'; 
 
+export const SRI_LANKA_LOCATIONS = [
+    { name: "Colombo - Fort", lat: 6.9271, lng: 79.8612, district: "Colombo" },
+    { name: "Colombo - Nugegoda", lat: 6.8741, lng: 79.8943, district: "Colombo" },
+    { name: "Gampaha", lat: 7.0897, lng: 79.9925, district: "Gampaha" },
+    { name: "Negombo", lat: 7.2008, lng: 79.8358, district: "Gampaha" },
+    { name: "Kandy - City", lat: 7.2906, lng: 80.6337, district: "Kandy" },
+    { name: "Galle - Fort", lat: 6.0329, lng: 80.2170, district: "Galle" },
+    { name: "Matara", lat: 5.9515, lng: 80.5353, district: "Matara" },
+    { name: "Jaffna", lat: 9.6615, lng: 80.0255, district: "Jaffna" },
+    { name: "Anuradhapura", lat: 8.3114, lng: 80.4037, district: "Anuradhapura" },
+    { name: "Kurunegala", lat: 7.4863, lng: 80.3623, district: "Kurunegala" },
+    { name: "Batticaloa", lat: 7.7170, lng: 81.7000, district: "Batticaloa" },
+    { name: "Trincomalee", lat: 8.5711, lng: 81.2335, district: "Trincomalee" },
+    { name: "Ratnapura", lat: 6.7056, lng: 80.3847, district: "Ratnapura" },
+    { name: "Badulla", lat: 6.9895, lng: 81.0557, district: "Badulla" },
+    { name: "Nuwara Eliya", lat: 6.9607, lng: 80.7718, district: "Nuwara Eliya" }
+];
+
 const ReportCase = () => {
     const navigate = useNavigate();
+    const { currentUser } = useAuth();
 
     const [formData, setFormData] = useState({
         caseId: '',
@@ -19,7 +39,8 @@ const ReportCase = () => {
         name: '',
         nic: '',
         age: '',
-        gender: ''
+        gender: '',
+        locationIndex: ''
     });
 
     const [images, setImages] = useState([]);
@@ -87,8 +108,8 @@ const ReportCase = () => {
     const handleClose = () => navigate('/dashboard');
 
     const handleSubmit = async () => {
-        if (!formData.caseType || !formData.name || !formData.nic || !formData.age || !formData.gender) {
-            alert("Please fill in all mandatory details.");
+        if (!formData.caseType || !formData.name || !formData.nic || !formData.age || !formData.gender || formData.locationIndex === '') {
+            alert("Please fill in all mandatory details, including last seen location.");
             return;
         }
 
@@ -133,11 +154,20 @@ const ReportCase = () => {
             }
 
             
+            const selectedLoc = SRI_LANKA_LOCATIONS[parseInt(formData.locationIndex, 10)] || SRI_LANKA_LOCATIONS[0];
+            const lastSeenLocation = {
+                name: selectedLoc.name,
+                district: selectedLoc.district,
+                lat: selectedLoc.lat,
+                lng: selectedLoc.lng
+            };
+
             const victimRef = doc(db, 'victims', caseId);
             await setDoc(victimRef, {
                 ...formData,
                 caseId: caseId,
                 status: 'Investigating',
+                lastSeenLocation: lastSeenLocation,
                 createdAt: serverTimestamp()
             });
 
@@ -175,7 +205,8 @@ const ReportCase = () => {
             name: '',
             nic: '',
             age: '',
-            gender: ''
+            gender: '',
+            locationIndex: ''
         });
         setImages([]);
         setVideos([]);
@@ -197,7 +228,7 @@ const ReportCase = () => {
                 <div className="history-header-right">
                     <div className="user-profile" onClick={() => setShowProfile(true)} style={{ cursor: 'pointer' }}>
                         <UserIcon size={22} fill="#d6e4ea" color="#d6e4ea" />
-                        <span>John Doe</span>
+                        <span>{currentUser?.username || 'John Doe'}</span>
                     </div>
                     <Bell
                         size={22}
@@ -256,6 +287,15 @@ const ReportCase = () => {
                                     <option value="Male">Male</option>
                                     <option value="Female">Female</option>
                                     <option value="Prefer not to say">Prefer not to say</option>
+                                </select>
+                            </div>
+                            <div className="form-group">
+                                <label>Last Seen</label>
+                                <select name="locationIndex" value={formData.locationIndex} onChange={handleInputChange}>
+                                    <option value="" disabled>Select Last Known Location</option>
+                                    {SRI_LANKA_LOCATIONS.map((loc, idx) => (
+                                        <option key={idx} value={idx}>{loc.name} ({loc.district})</option>
+                                    ))}
                                 </select>
                             </div>
                         </div>

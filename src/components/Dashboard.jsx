@@ -63,6 +63,8 @@ const Dashboard = () => {
                 snapshot.forEach((doc) => {
                     const data = doc.data();
                     casesList.push({
+                        id: doc.id,
+                        ...data,
                         status: data.status || 'Investigating',
                         caseType: data.caseType || ''
                     });
@@ -143,7 +145,7 @@ const Dashboard = () => {
                 </div>
 
                 <div className="map-section">
-                    <MapComponent />
+                    <MapComponent cases={cases} />
                 </div>
                 <div className="action-buttons">
                     <button className="action-btn" onClick={() => navigate('/report-case')}>Find a Missing Person</button>

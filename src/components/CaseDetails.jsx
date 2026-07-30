@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, User as UserIcon, Bell, Loader, X, Edit, ShieldAlert } from 'lucide-react';
+import { ArrowLeft, User as UserIcon, Bell, Loader, X, Edit, ShieldAlert, MapPin } from 'lucide-react';
 import logo from '../assets/logo.png';
 import Notifications from './Notifications';
 import UserProfileModal from './UserProfileModal';
@@ -8,7 +8,43 @@ import { db } from '../firebaseConfig';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
 import { addLog } from '../utils/logService';
+import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
+import L from 'leaflet';
+import { SRI_LANKA_LOCATIONS } from './ReportCase';
+import 'leaflet/dist/leaflet.css';
 import './CaseDetails.css';
+
+const createCaseDetailsIcon = (status) => {
+    let color = '#E53935';
+    let pulseColor = 'rgba(229, 57, 53, 0.4)';
+    if (status?.toLowerCase() === 'found' || status?.toLowerCase() === 'closed') {
+        color = '#4CAF50';
+        pulseColor = 'rgba(76, 175, 80, 0.4)';
+    } else if (status?.toLowerCase() === 'cold') {
+        color = '#42A5F5';
+        pulseColor = 'rgba(66, 165, 245, 0.4)';
+    }
+
+    return L.divIcon({
+        className: 'case-details-marker',
+        html: `<div style="
+            background-color: ${color};
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            border: 3px solid #ffffff;
+            box-shadow: 0 0 0 8px ${pulseColor}, 0 2px 8px rgba(0,0,0,0.6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        ">
+            <div style="width: 10px; height: 10px; background: #fff; border-radius: 50%;"></div>
+        </div>`,
+        iconSize: [28, 28],
+        iconAnchor: [14, 14],
+        popupAnchor: [0, -18]
+    });
+};
 
 const CaseDetails = () => {
     const { id } = useParams();
@@ -28,8 +64,31 @@ const CaseDetails = () => {
     const [showStatusModal, setShowStatusModal] = useState(false);
     const [selectedStatus, setSelectedStatus] = useState('Investigating');
     const [isSavingStatus, setIsSavingStatus] = useState(false);
+    const [searchRadius, setSearchRadius] = useState(5000);
 
     const displayId = id && id !== 'undefined' ? id : '_______________';
+
+    const getCaseCoords = () => {
+        if (caseData && caseData.lastSeenLocation && caseData.lastSeenLocation.lat && caseData.lastSeenLocation.lng) {
+            return [caseData.lastSeenLocation.lat, caseData.lastSeenLocation.lng];
+        }
+        const fallbackIdx = (caseData?.name ? caseData.name.charCodeAt(0) : 0) % SRI_LANKA_LOCATIONS.length;
+        const loc = SRI_LANKA_LOCATIONS[fallbackIdx] || SRI_LANKA_LOCATIONS[0];
+        return [loc.lat, loc.lng];
+    };
+
+    const getCaseLocationLabel = () => {
+        if (caseData && caseData.lastSeenLocation && caseData.lastSeenLocation.name) {
+            return `${caseData.lastSeenLocation.name} (${caseData.lastSeenLocation.district || ''})`;
+        }
+        const fallbackIdx = (caseData?.name ? caseData.name.charCodeAt(0) : 0) % SRI_LANKA_LOCATIONS.length;
+        const loc = SRI_LANKA_LOCATIONS[fallbackIdx] || SRI_LANKA_LOCATIONS[0];
+        return `${loc.name} (${loc.district})`;
+    };
+
+    const caseCoords = getCaseCoords();
+    const caseLocLabel = getCaseLocationLabel();
+    const markerIcon = createCaseDetailsIcon(caseData?.status);
 
     useEffect(() => {
         const fetchCaseDetails = async () => {
@@ -209,6 +268,12 @@ const CaseDetails = () => {
                                             <span className="info-label">Age :</span>
                                             <span className="info-value">{caseData?.age || 'N/A'}</span>
                                         </div>
+                                        <div className="info-row">
+                                            <span className="info-label">Last seen :</span>
+                                            <span className="info-value" style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                                <MapPin size={14} color="var(--sky)" /> {caseLocLabel}
+                                            </span>
+                                        </div>
                                         
                                         <div className="about-case">
                                             <span className="info-label">About Case :</span>
@@ -220,7 +285,75 @@ const CaseDetails = () => {
                                 </div>
 
                                 <div className="case-visuals-panel">
-                                    <div className="case-map-box" title="Victim Incident Map Coordinates"></div>
+                                    <div className="case-map-box">
+                                        <div className="radius-controls-overlay">
+                                            <span className="radius-label">Search Zone:</span>
+                                            <button 
+                                                type="button"
+                                                className={`radius-pill ${searchRadius === 2000 ? 'active' : ''}`}
+                                                onClick={() => setSearchRadius(2000)}
+                                            >
+                                                2km
+                                            </button>
+                                            <button 
+                                                type="button"
+                                                className={`radius-pill ${searchRadius === 5000 ? 'active' : ''}`}
+                                                onClick={() => setSearchRadius(5000)}
+                                            >
+                                                5km
+                                            </button>
+                                            <button 
+                                                type="button"
+                                                className={`radius-pill ${searchRadius === 10000 ? 'active' : ''}`}
+                                                onClick={() => setSearchRadius(10000)}
+                                            >
+                                                10km
+                                            </button>
+                                            <button 
+                                                type="button"
+                                                className={`radius-pill ${searchRadius === 25000 ? 'active' : ''}`}
+                                                onClick={() => setSearchRadius(25000)}
+                                            >
+                                                25km
+                                            </button>
+                                        </div>
+                                        <MapContainer 
+                                            key={caseCoords.join(',')}
+                                            center={caseCoords} 
+                                            zoom={12} 
+                                            scrollWheelZoom={true}
+                                            style={{ height: '100%', width: '100%' }}
+                                        >
+                                            <TileLayer
+                                                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                                                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                            />
+                                            <Circle 
+                                                center={caseCoords} 
+                                                radius={searchRadius} 
+                                                pathOptions={{ 
+                                                    color: caseData?.status?.toLowerCase() === 'found' || caseData?.status?.toLowerCase() === 'closed' ? '#4CAF50' : 
+                                                           caseData?.status?.toLowerCase() === 'cold' ? '#42A5F5' : '#E53935', 
+                                                    fillColor: caseData?.status?.toLowerCase() === 'found' || caseData?.status?.toLowerCase() === 'closed' ? '#4CAF50' : 
+                                                               caseData?.status?.toLowerCase() === 'cold' ? '#42A5F5' : '#E53935', 
+                                                    fillOpacity: 0.15, 
+                                                    weight: 2,
+                                                    dashArray: '4, 4'
+                                                }} 
+                                            />
+                                            <Marker position={caseCoords} icon={markerIcon}>
+                                                <Popup className="argus-custom-popup">
+                                                    <div style={{ padding: '0.2rem', color: '#111', fontFamily: 'sans-serif' }}>
+                                                        <strong style={{ fontSize: '0.95rem' }}>{caseData?.name || 'Subject'}</strong>
+                                                        <div style={{ marginTop: '0.25rem', fontSize: '0.85rem' }}>
+                                                            <div><strong>Last Known:</strong> {caseLocLabel}</div>
+                                                            <div><strong>Search Perimeter:</strong> {searchRadius / 1000} km</div>
+                                                        </div>
+                                                    </div>
+                                                </Popup>
+                                            </Marker>
+                                        </MapContainer>
+                                    </div>
                                     
                                     <div className="case-feed-box">
                                         {mediaData && ((mediaData.imageUrls && mediaData.imageUrls.length > 0) || (mediaData.videoUrls && mediaData.videoUrls.length > 0)) ? (

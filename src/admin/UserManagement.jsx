@@ -121,7 +121,7 @@ const UserManagement = () => {
                 });
             });
 
-            // 2. Fetch from 'investigators'
+            // 2. Fetch from 'investigators' (table is automatically created in Firebase when an admin adds the first investigator)
             const invSnapshot = await getDocs(collection(db, 'investigators'));
             invSnapshot.forEach((doc) => {
                 const data = doc.data();
@@ -151,7 +151,9 @@ const UserManagement = () => {
 
     // Handle adding users
     const handleAddUser = async (e) => {
-        e.preventDefault();
+        if (e && typeof e.preventDefault === 'function') {
+            e.preventDefault();
+        }
         setFormError('');
 
         if (!newName.trim() || !newUsername.trim() || !newPassword.trim() || !newNic.trim()) {
@@ -187,8 +189,8 @@ const UserManagement = () => {
             return;
         }
 
-        // Validate that username contains role identifiers
-        let finalUsername = newUsername.trim().toLowerCase();
+        // Validate that username contains role identifiers and replace internal spaces with underscores
+        let finalUsername = newUsername.trim().toLowerCase().replace(/\s+/g, '_');
         if (newRole === 'Admin' && !finalUsername.includes('admin')) {
             finalUsername = `admin_${finalUsername}`;
         } else if (newRole === 'Root Admin' && !finalUsername.includes('root')) {
@@ -220,8 +222,8 @@ const UserManagement = () => {
                 finalImageUrl = `https://api.dicebear.com/7.x/bottts/svg?seed=${finalUsername}`;
             }
 
-            const roleLower = newRole.toLowerCase(); // 'admin' or 'investigator'
-            const targetCollection = roleLower === 'admin' ? 'admins' : 'investigators';
+            const roleLower = newRole.toLowerCase();
+            const targetCollection = (roleLower === 'admin' || roleLower === 'root admin') ? 'admins' : 'investigators';
             const docId = finalUsername;
 
             const docRef = doc(db, targetCollection, docId);
@@ -299,6 +301,12 @@ const UserManagement = () => {
         // Limit to 2 Root Admins
         if (newRole === 'Root Admin' && editingUser.role.toLowerCase() !== 'root admin' && rootAdminCount >= 2) {
             setFormError('Only two Root Admins can act in the system.');
+            return;
+        }
+
+        // Ensure at least 1 Root Admin remains in the system
+        if (editingUser.role.toLowerCase() === 'root admin' && newRole !== 'Root Admin' && rootAdminCount <= 1) {
+            setFormError('At least one Root Admin must remain in the system at all times.');
             return;
         }
 
@@ -430,11 +438,13 @@ const UserManagement = () => {
     };
 
     const handleFormSubmit = async (e) => {
-        e.preventDefault();
+        if (e && typeof e.preventDefault === 'function') {
+            e.preventDefault();
+        }
         if (editingUser) {
             await handleUpdateUser();
         } else {
-            await handleAddUser();
+            await handleAddUser(e);
         }
     };
 
@@ -471,6 +481,12 @@ const UserManagement = () => {
         // Prevent self-deletion
         if (user.username === currentUser?.username) {
             alert('Access Denied: You cannot delete your own Root Admin account.');
+            return;
+        }
+
+        // Ensure at least one Root Admin is preserved in the system
+        if (user.role?.toLowerCase() === 'root admin' && users.filter(u => u.role?.toLowerCase() === 'root admin').length <= 1) {
+            alert('Access Denied: At least one Root Admin must remain in the system at all times.');
             return;
         }
 

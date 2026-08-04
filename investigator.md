@@ -29,7 +29,9 @@ src/
 ├── contexts/
 │   └── AuthContext.jsx      # Authentication & session identity provider
 └── utils/
-    └── logService.js        # Audit and activity logging utility
+    ├── logService.js        # Audit and activity logging utility
+    ├── geoService.js        # Hybrid GPS hardware detection & OSM Nominatim geocoding
+    └── cctvService.js       # Zone-Based CCTV surveillance architecture & alert simulator
 ```
 
 ---
@@ -42,27 +44,34 @@ src/
   * Connects to Firebase Firestore (`victims` collection) to pull active case records.
   * Dynamically computes real-time statistics (Total Cases, Missing, Investigating, Found, Cold Cases) utilizing custom animated numerical counters (`CountUp`).
   * Integrates the interactive geospatial view (`<MapComponent />`) and passes live active case records for spatial mapping.
-  * Renders quick-action routing to *"Find a Missing Person"* (`/report-case`) and *"History"* (`/history`).
+  * Renders quick-action routing to *"Find a Missing Person"* (`/report-case`), *"CCTV Zones & Admin"* (`/cctv-network`), and *"History"* (`/history`).
 
-### `Map.jsx` — Interactive Geospatial Surveillance & Mapping
+### `Map.jsx` — Interactive Surveillance & Command Map
 * **Primary Role:** Powers the interactive web map embedded in the Dashboard using React-Leaflet and OpenStreetMap tiles.
 * **Core Work:**
-  * Constricts viewport panning to national boundaries (e.g., Sri Lanka coordinates) for focused operational usability.
-  * Renders dynamic case pin markers based on latitude/longitude coordinates logged in case files (`lastSeenLocation`).
-  * Displays interactive popup summaries on pin selection containing victim identity, classification status badge, photo thumbnail, and a direct `"View Case File"` routing link.
+  * **Clean Node & Pursuit Mapping:** To prevent visual circle clutter on the primary map, geographic zone borders are offloaded to the specialized Admin/Zone console. The map focuses strictly on tactical action layers with toggles for **🎥 CCTV Nodes**, **🚨 Live Detections**, and **👤 Active Subjects**.
+  * **Interactive AI Alarm Simulation:** Deployed CCTV camera pins display live node diagnostics (IP addresses, stream resolutions, AI capabilities) and feature a **"🚨 Simulate AI Recognition Alert Here"** demonstration trigger to generate test sightings in real time.
+  * **Police Pursuit Tracking Trails:** Automatically maps glowing orange polyline trails connecting a missing subject's initial *Last Seen GPS Location* directly to new surveillance detection coordinates.
 
-### `ReportCase.jsx` — Case Intake & Geocoding Pipeline
-* **Primary Role:** Handles the formal registration and database entry of missing persons or investigation targets.
+### `CctvNetwork.jsx` — Dedicated CCTV Sector & Zone Management Console
+* **Primary Role:** Functions as an Admin-grade command interface (`/cctv-network` and `/admin/surveillance`) dedicated to managing surveillance sectors and camera deployments.
 * **Core Work:**
+  * **Sector Analysis & Filtering:** Provides dedicated tabs for each surveillance zone (e.g., *Western Transit Corridor*, *Southern Gateway*, etc.) with live stats, coverage radius, and precise GPS focal center coordinates.
+  * **Simulated AI Surveillance Feeds:** Renders an animated biometric computer vision stream box on each camera card displaying real-time FPS, IP telemetry, and active target detection scanners.
+  * **Dynamic Node Deployment:** Enables officers and system admins to deploy new custom CCTV camera nodes directly into any selected zone with a single-click **"Auto-Detect Current GPS"** integration and realistic hardware spec selection.
+
+### `ReportCase.jsx` & `geoService.js` — Hybrid GPS & Case Intake Pipeline
+* **Primary Role:** Handles formal registration of missing persons using device-native hardware geolocating.
+* **Core Work:**
+  * **Hybrid GPS Telemetry:** Eliminates static hardcoded dropdowns in favor of an **"Auto-Detect GPS"** sensor button that harvests real-time hardware device lat/lng and executes reverse-geocoding via OpenStreetMap Nominatim APIs to fill structured address fields.
   * Enforces formatting and mandatory validation on national identifier numbers (NIC), automatically deriving systematic reference codes (`caseId`).
-  * Captures **Last Seen Location** via interactive District/City dropdown selection paired with exact latitude/longitude coordinates.
   * Handles multi-file uploads (images and CCTV video footage) directly into Firebase Cloud Storage (`person_media` documents and Cloud storage paths), linking download references directly to the newly created Firestore record.
 
 ### `CaseDetails.jsx` — Dedicated Forensic Case Workspace
 * **Primary Role:** Delivers deep-dive investigation capabilities for an isolated case file (`/case/:id`).
 * **Core Work:**
   * Retrieves and matches victim profile statistics alongside related surveillance media attachments.
-  * **Interactive Investigation Map & Search Perimeter:** Replaces static placeholders with an embedded interactive map centered on the victim's last known coordinates, complete with user-adjustable search perimeter radius overlays (e.g., 2km, 5km, 10km zones).
+  * **Interactive Investigation Map & Search Perimeter:** Renders an embedded interactive map centered on the victim's authentic coordinates, complete with user-adjustable search perimeter radius overlays (e.g., 2km, 5km, 10km zones) and camera detection pursuit polylines.
   * Facilitates official status transitions (`Investigating` $\rightarrow$ `Found`, `Cold`, or `Closed`).
   * Automatically writes structured administrative audit trail entries via `addLog` directly into the system audit registry whenever a case's operational status changes.
 
@@ -73,30 +82,40 @@ src/
   * Implements multi-attribute filtering (searching simultaneously across Case Names, National ID Cards (NIC), and system reference IDs).
   * Supports custom sorting algorithms (chronological ordering by insertion timestamps and alphabetical sorting).
 
-### `Notifications.jsx` & `UserProfileModal.jsx` — Support Modules
-* **Primary Role:** Lightweight overlay modals providing contextual awareness and profile management.
-* **Core Work:**
-  * Renders actionable security and system updates inside an expandable notification drawer.
-  * Displays logged-in investigator credentials retrieved dynamically from `AuthContext`.
-
 ---
 
-## 3. Geospatial Data Schema (`lastSeenLocation`)
+## 3. Geospatial & Surveillance Data Schemas
 
-When cases are logged or manipulated, geolocation data is structured within Firestore under the victim's document:
-
+### Subject Document (`victims` Collection)
 ```json
 {
-  "caseId": "Case-1234",
+  "caseId": "CASE-1234",
   "name": "Kamal Perera",
   "status": "Investigating",
   "lastSeenLocation": {
-    "district": "Colombo",
-    "city": "Fort",
     "lat": 6.9271,
     "lng": 79.8612,
-    "description": "Near Central Bus Station"
+    "name": "Colombo Fort, Western Province",
+    "source": "HYBRID_DEVICE_GPS"
   }
 }
 ```
-This standardized schema guarantees immediate interoperability between `ReportCase.jsx` intake forms, `Dashboard.jsx` national visualizers, and `CaseDetails.jsx` forensic search radius projectors.
+
+### Surveillance Alert Log (`detections` Collection)
+When an AI facial recognition hit or CCTV sighting occurs, real-time alerts are stored with direct linkage to the target case and camera node:
+```json
+{
+  "caseId": "CASE-1234",
+  "victimName": "Kamal Perera",
+  "cameraId": "CCTV-101",
+  "zoneId": "Z01",
+  "locationName": "Fort Railway Central Terminal Platform 1",
+  "coordinates": {
+    "lat": 6.9333,
+    "lng": 79.8601
+  },
+  "confidenceScore": 0.94,
+  "alertStatus": "ACTIVE_PURSUIT"
+}
+```
+This standardized dual-collection schema guarantees real-time interoperability between automated CCTV nodes, investigator pursuit displays, and case detail dashboards.

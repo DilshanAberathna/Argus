@@ -6,6 +6,7 @@ import ProtectedRoute from './components/ProtectedRoute';
 import History from './components/History';
 import ReportCase from './components/ReportCase';
 import CaseDetails from './components/CaseDetails';
+import CctvNetwork from './components/CctvNetwork';
 import AdminDashboard from './admin/AdminDashboard';
 import UserManagement from './admin/UserManagement';
 import LogViewer from './admin/LogViewer';
@@ -39,6 +40,14 @@ function App() {
         element={
           <ProtectedRoute allowedRole="investigator">
             <ReportCase />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/cctv-network"
+        element={
+          <ProtectedRoute allowedRole="investigator">
+            <CctvNetwork isAdmin={false} />
           </ProtectedRoute>
         }
       />

@@ -1,7 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { db } from '../firebaseConfig';
-import { collection, query, where, getDocs, doc, setDoc, onSnapshot, getDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, setDoc, onSnapshot, getDoc, deleteDoc } from 'firebase/firestore';
 import { addLog } from '../utils/logService';
 
 const AuthContext = createContext();
@@ -37,22 +37,12 @@ export const AuthProvider = ({ children }) => {
                 console.log('Updated first root admin role to Root Admin.');
             }
 
-            // Check & seed root admin 2 (root.admin)
+            // Remove legacy second default root admin (root.admin) if it exists, ensuring only 1 default root admin is kept
             const admin2Ref = doc(db, 'admins', 'root_admin');
             const admin2Snap = await getDoc(admin2Ref);
-            if (!admin2Snap.exists()) {
-                await setDoc(admin2Ref, {
-                    name: 'Root Admin',
-                    username: 'root.admin',
-                    email: 'rootadmin@argus.com',
-                    password: 'Admin@123',
-                    nic: '199502104524',
-                    image: 'https://api.dicebear.com/7.x/bottts/svg?seed=rootadmin',
-                    role: 'Root Admin',
-                    status: 'Active',
-                    lastLogin: 'Never'
-                });
-                console.log('Seeded second root admin account (root.admin).');
+            if (admin2Snap.exists()) {
+                await deleteDoc(admin2Ref);
+                console.log('Removed legacy second default root admin account (root.admin).');
             }
         } catch (error) {
             console.error('Error seeding database:', error);

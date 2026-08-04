@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Bell, User as UserIcon, PlusCircle, XCircle, Play, CheckCircle, Trash2 } from 'lucide-react';
+import { ArrowLeft, Bell, User as UserIcon, PlusCircle, XCircle, Play, CheckCircle, Trash2, MapPin, Navigation, Loader } from 'lucide-react';
 import { db, storage } from '../firebaseConfig';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -8,26 +8,9 @@ import logo from '../assets/logo.png';
 import Notifications from './Notifications';
 import UserProfileModal from './UserProfileModal';
 import { useAuth } from '../contexts/AuthContext';
+import { getDeviceGPS, reverseGeocode } from '../utils/geoService';
 import './ReportCase.css';
 import './History.css'; 
-
-export const SRI_LANKA_LOCATIONS = [
-    { name: "Colombo - Fort", lat: 6.9271, lng: 79.8612, district: "Colombo" },
-    { name: "Colombo - Nugegoda", lat: 6.8741, lng: 79.8943, district: "Colombo" },
-    { name: "Gampaha", lat: 7.0897, lng: 79.9925, district: "Gampaha" },
-    { name: "Negombo", lat: 7.2008, lng: 79.8358, district: "Gampaha" },
-    { name: "Kandy - City", lat: 7.2906, lng: 80.6337, district: "Kandy" },
-    { name: "Galle - Fort", lat: 6.0329, lng: 80.2170, district: "Galle" },
-    { name: "Matara", lat: 5.9515, lng: 80.5353, district: "Matara" },
-    { name: "Jaffna", lat: 9.6615, lng: 80.0255, district: "Jaffna" },
-    { name: "Anuradhapura", lat: 8.3114, lng: 80.4037, district: "Anuradhapura" },
-    { name: "Kurunegala", lat: 7.4863, lng: 80.3623, district: "Kurunegala" },
-    { name: "Batticaloa", lat: 7.7170, lng: 81.7000, district: "Batticaloa" },
-    { name: "Trincomalee", lat: 8.5711, lng: 81.2335, district: "Trincomalee" },
-    { name: "Ratnapura", lat: 6.7056, lng: 80.3847, district: "Ratnapura" },
-    { name: "Badulla", lat: 6.9895, lng: 81.0557, district: "Badulla" },
-    { name: "Nuwara Eliya", lat: 6.9607, lng: 80.7718, district: "Nuwara Eliya" }
-];
 
 const ReportCase = () => {
     const navigate = useNavigate();
@@ -40,7 +23,9 @@ const ReportCase = () => {
         nic: '',
         age: '',
         gender: '',
-        locationIndex: ''
+        locationName: '',
+        latitude: '',
+        longitude: ''
     });
 
     const [images, setImages] = useState([]);
@@ -49,10 +34,30 @@ const ReportCase = () => {
     const [showNotifications, setShowNotifications] = useState(false);
     const [showProfile, setShowProfile] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
+    const [isDetectingGPS, setIsDetectingGPS] = useState(false);
 
     const imageInputRef = useRef(null);
     const videoInputRef = useRef(null);
     const uploadTasksRef = useRef([]);
+
+    const handleDetectGPS = async () => {
+        setIsDetectingGPS(true);
+        try {
+            const coords = await getDeviceGPS();
+            const geoData = await reverseGeocode(coords.lat, coords.lng);
+            setFormData(prev => ({
+                ...prev,
+                latitude: coords.lat.toString(),
+                longitude: coords.lng.toString(),
+                locationName: geoData.displayName || `${geoData.city}, ${geoData.district}`
+            }));
+        } catch (error) {
+            console.error("GPS error:", error);
+            alert("Unable to acquire live GPS signal: " + (error.message || "Permission denied or signal unavailable. You can enter coordinates manually."));
+        } finally {
+            setIsDetectingGPS(false);
+        }
+    };
 
     const handleCancelUpload = () => {
         uploadTasksRef.current.forEach(task => task.cancel());
@@ -108,8 +113,8 @@ const ReportCase = () => {
     const handleClose = () => navigate('/dashboard');
 
     const handleSubmit = async () => {
-        if (!formData.caseType || !formData.name || !formData.nic || !formData.age || !formData.gender || formData.locationIndex === '') {
-            alert("Please fill in all mandatory details, including last seen location.");
+        if (!formData.caseType || !formData.name || !formData.nic || !formData.age || !formData.gender || !formData.locationName || !formData.latitude || !formData.longitude) {
+            alert("Please fill in all mandatory details, including geolocation coordinates (or click Auto-Detect GPS).");
             return;
         }
 
@@ -154,12 +159,11 @@ const ReportCase = () => {
             }
 
             
-            const selectedLoc = SRI_LANKA_LOCATIONS[parseInt(formData.locationIndex, 10)] || SRI_LANKA_LOCATIONS[0];
             const lastSeenLocation = {
-                name: selectedLoc.name,
-                district: selectedLoc.district,
-                lat: selectedLoc.lat,
-                lng: selectedLoc.lng
+                name: formData.locationName,
+                lat: parseFloat(formData.latitude),
+                lng: parseFloat(formData.longitude),
+                source: "Hybrid GPS / Camera Geocoding"
             };
 
             const victimRef = doc(db, 'victims', caseId);
@@ -206,7 +210,9 @@ const ReportCase = () => {
             nic: '',
             age: '',
             gender: '',
-            locationIndex: ''
+            locationName: '',
+            latitude: '',
+            longitude: ''
         });
         setImages([]);
         setVideos([]);
@@ -289,14 +295,83 @@ const ReportCase = () => {
                                     <option value="Prefer not to say">Prefer not to say</option>
                                 </select>
                             </div>
-                            <div className="form-group">
-                                <label>Last Seen</label>
-                                <select name="locationIndex" value={formData.locationIndex} onChange={handleInputChange}>
-                                    <option value="" disabled>Select Last Known Location</option>
-                                    {SRI_LANKA_LOCATIONS.map((loc, idx) => (
-                                        <option key={idx} value={idx}>{loc.name} ({loc.district})</option>
-                                    ))}
-                                </select>
+
+                            <div className="hybrid-gps-container" style={{ 
+                                marginTop: '0.2rem', 
+                                padding: '0.85rem', 
+                                background: 'rgba(35, 38, 43, 0.65)', 
+                                border: '1px solid var(--border)', 
+                                borderRadius: '8px',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '0.65rem'
+                            }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                    <span style={{ fontSize: '0.82rem', fontWeight: '700', color: 'var(--ice)', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                                        📍 Camera / GPS Geolocation
+                                    </span>
+                                    <button
+                                        type="button"
+                                        onClick={handleDetectGPS}
+                                        disabled={isDetectingGPS}
+                                        style={{
+                                            padding: '0.35rem 0.7rem',
+                                            background: isDetectingGPS ? 'var(--surface)' : 'var(--grad-primary)',
+                                            border: '1px solid var(--border)',
+                                            borderRadius: '6px',
+                                            color: '#fff',
+                                            cursor: isDetectingGPS ? 'not-allowed' : 'pointer',
+                                            fontSize: '0.78rem',
+                                            fontWeight: '700',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '0.35rem',
+                                            transition: 'transform 0.2s'
+                                        }}
+                                    >
+                                        {isDetectingGPS ? <Loader size={13} className="spinner" /> : <Navigation size={13} />}
+                                        {isDetectingGPS ? "Detecting GPS..." : "Auto-Detect GPS"}
+                                    </button>
+                                </div>
+
+                                <div className="form-group" style={{ gap: '0.5rem', margin: 0 }}>
+                                    <label style={{ minWidth: '70px', fontSize: '0.8rem' }}>Location</label>
+                                    <input 
+                                        type="text" 
+                                        name="locationName" 
+                                        placeholder="e.g. Colombo Fort / Camera #4" 
+                                        value={formData.locationName} 
+                                        onChange={handleInputChange} 
+                                        style={{ height: '36px', fontSize: '0.82rem' }}
+                                    />
+                                </div>
+
+                                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                                    <div className="form-group" style={{ gap: '0.5rem', flex: 1, margin: 0 }}>
+                                        <label style={{ minWidth: '40px', width: 'auto', fontSize: '0.8rem' }}>Lat</label>
+                                        <input 
+                                            type="number" 
+                                            step="any"
+                                            name="latitude" 
+                                            placeholder="6.9271" 
+                                            value={formData.latitude} 
+                                            onChange={handleInputChange}
+                                            style={{ height: '36px', fontSize: '0.82rem' }} 
+                                        />
+                                    </div>
+                                    <div className="form-group" style={{ gap: '0.5rem', flex: 1, margin: 0 }}>
+                                        <label style={{ minWidth: '40px', width: 'auto', fontSize: '0.8rem' }}>Lng</label>
+                                        <input 
+                                            type="number" 
+                                            step="any"
+                                            name="longitude" 
+                                            placeholder="79.8612" 
+                                            value={formData.longitude} 
+                                            onChange={handleInputChange}
+                                            style={{ height: '36px', fontSize: '0.82rem' }} 
+                                        />
+                                    </div>
+                                </div>
                             </div>
                         </div>
 

@@ -5,14 +5,36 @@ import logo from '../assets/logo.png';
 import Notifications from './Notifications';
 import UserProfileModal from './UserProfileModal';
 import { db } from '../firebaseConfig';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, collection, onSnapshot, query, where } from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
 import { addLog } from '../utils/logService';
-import { MapContainer, TileLayer, Marker, Popup, Circle } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Circle, Polyline } from 'react-leaflet';
 import L from 'leaflet';
-import { SRI_LANKA_LOCATIONS } from './ReportCase';
 import 'leaflet/dist/leaflet.css';
 import './CaseDetails.css';
+
+const createCaseDetectionIcon = () => {
+    return L.divIcon({
+        className: 'custom-detection-marker',
+        html: `<div style="
+            background-color: #FF6F00;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            border: 3px solid #FFF;
+            box-shadow: 0 0 0 8px rgba(255, 111, 0, 0.45), 0 2px 10px rgba(0,0,0,0.8);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+        ">
+            🚨
+        </div>`,
+        iconSize: [30, 30],
+        iconAnchor: [15, 15],
+        popupAnchor: [0, -16]
+    });
+};
 
 const createCaseDetailsIcon = (status) => {
     let color = '#E53935';
@@ -65,30 +87,51 @@ const CaseDetails = () => {
     const [selectedStatus, setSelectedStatus] = useState('Investigating');
     const [isSavingStatus, setIsSavingStatus] = useState(false);
     const [searchRadius, setSearchRadius] = useState(5000);
+    const [caseDetections, setCaseDetections] = useState([]);
 
     const displayId = id && id !== 'undefined' ? id : '_______________';
 
     const getCaseCoords = () => {
         if (caseData && caseData.lastSeenLocation && caseData.lastSeenLocation.lat && caseData.lastSeenLocation.lng) {
-            return [caseData.lastSeenLocation.lat, caseData.lastSeenLocation.lng];
+            return [parseFloat(caseData.lastSeenLocation.lat), parseFloat(caseData.lastSeenLocation.lng)];
         }
-        const fallbackIdx = (caseData?.name ? caseData.name.charCodeAt(0) : 0) % SRI_LANKA_LOCATIONS.length;
-        const loc = SRI_LANKA_LOCATIONS[fallbackIdx] || SRI_LANKA_LOCATIONS[0];
-        return [loc.lat, loc.lng];
+        if (caseData && caseData.latitude && caseData.longitude) {
+            return [parseFloat(caseData.latitude), parseFloat(caseData.longitude)];
+        }
+        return [6.9271, 79.8612];
     };
 
     const getCaseLocationLabel = () => {
         if (caseData && caseData.lastSeenLocation && caseData.lastSeenLocation.name) {
-            return `${caseData.lastSeenLocation.name} (${caseData.lastSeenLocation.district || ''})`;
+            return caseData.lastSeenLocation.name;
         }
-        const fallbackIdx = (caseData?.name ? caseData.name.charCodeAt(0) : 0) % SRI_LANKA_LOCATIONS.length;
-        const loc = SRI_LANKA_LOCATIONS[fallbackIdx] || SRI_LANKA_LOCATIONS[0];
-        return `${loc.name} (${loc.district})`;
+        if (caseData && caseData.locationName) return caseData.locationName;
+        return "Unspecified Geolocation";
     };
 
     const caseCoords = getCaseCoords();
     const caseLocLabel = getCaseLocationLabel();
     const markerIcon = createCaseDetailsIcon(caseData?.status);
+
+    useEffect(() => {
+        if (!id || id === 'undefined') return;
+        try {
+            const q = query(collection(db, 'detections'), where('caseId', '==', id));
+            const unsubscribe = onSnapshot(q, (snapshot) => {
+                const list = [];
+                snapshot.forEach(doc => {
+                    const data = doc.data();
+                    if (data.coordinates && data.coordinates.lat && data.coordinates.lng) {
+                        list.push({ id: doc.id, ...data });
+                    }
+                });
+                setCaseDetections(list);
+            });
+            return () => unsubscribe();
+        } catch (err) {
+            console.error("Error subscribing to case detections:", err);
+        }
+    }, [id]);
 
     useEffect(() => {
         const fetchCaseDetails = async () => {
@@ -352,6 +395,30 @@ const CaseDetails = () => {
                                                     </div>
                                                 </Popup>
                                             </Marker>
+                                            {caseDetections.map((det, dIdx) => {
+                                                const detCoords = [parseFloat(det.coordinates.lat), parseFloat(det.coordinates.lng)];
+                                                if (isNaN(detCoords[0]) || isNaN(detCoords[1])) return null;
+                                                const detIcon = createCaseDetectionIcon();
+                                                return (
+                                                    <React.Fragment key={`det-${det.id || dIdx}`}>
+                                                        <Polyline 
+                                                            positions={[caseCoords, detCoords]} 
+                                                            pathOptions={{ color: '#FF6F00', weight: 3, dashArray: '8, 8', opacity: 0.8 }} 
+                                                        />
+                                                        <Marker position={detCoords} icon={detIcon}>
+                                                            <Popup className="argus-custom-popup">
+                                                                <div style={{ padding: '0.2rem', color: '#111', fontFamily: 'sans-serif' }}>
+                                                                    <strong style={{ color: '#FF6F00', fontSize: '0.9rem' }}>🚨 CAMERA SIGHTING LOG</strong>
+                                                                    <div style={{ marginTop: '0.25rem', fontSize: '0.85rem' }}>
+                                                                        <div><strong>Camera:</strong> {det.cameraId || 'CCTV Feed'}</div>
+                                                                        <div><strong>Location:</strong> {det.locationName}</div>
+                                                                    </div>
+                                                                </div>
+                                                            </Popup>
+                                                        </Marker>
+                                                    </React.Fragment>
+                                                );
+                                            })}
                                         </MapContainer>
                                     </div>
                                     

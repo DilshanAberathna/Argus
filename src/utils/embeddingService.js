@@ -1,0 +1,93 @@
+// Sends uploaded case images and videos to the face recognition API, then saves model results to Firestore.
+
+import { db } from '../firebaseConfig';
+import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
+
+const FACE_API_BASE_URL = 'http://localhost:8000';
+
+
+export async function sendImagesToModel(imageFiles, caseId, name) {
+    if (!imageFiles || imageFiles.length === 0) return { results: [], total_files: 0 };
+
+    const formData = new FormData();
+    imageFiles.forEach((file) => formData.append('files', file));
+    formData.append('case_id', caseId);
+    formData.append('name', name);
+
+    const response = await fetch(`${FACE_API_BASE_URL}/process-images`, { method: 'POST', body: formData });
+    if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`API error (images): ${response.status} — ${errText}`);
+    }
+    return await response.json();
+}
+
+
+export async function sendVideoToModel(videoFile, caseId, name) {
+    if (!videoFile) return null;
+
+    const formData = new FormData();
+    formData.append('file', videoFile);
+    formData.append('case_id', caseId);
+    formData.append('name', name);
+
+    const response = await fetch(`${FACE_API_BASE_URL}/process-video`, { method: 'POST', body: formData });
+    if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`API error (video "${videoFile.name}"): ${response.status} — ${errText}`);
+    }
+    return await response.json();
+}
+
+
+export async function saveModelResultsToFirestore(caseId, imageResults, videoResults) {
+    const resultsRef = doc(db, 'face_model_results', caseId);
+    await setDoc(resultsRef, {
+        caseId,
+        imageResults: imageResults?.results || [],
+        videoResults: (videoResults || []).filter(Boolean),
+        total_image_files: imageResults?.total_files || 0,
+        total_video_files: (videoResults || []).filter(Boolean).length,
+        processedAt: serverTimestamp()
+    });
+    console.log(`[ARGUS] ML results saved to Firestore for case: ${caseId}`);
+}
+
+
+export async function sendMediaToModel(caseId, name, imageFiles, videoFiles) {
+    const errors = [];
+    let imageResults = null;
+    const videoResults = [];
+
+    if (imageFiles && imageFiles.length > 0) {
+        try {
+            imageResults = await sendImagesToModel(imageFiles, caseId, name);
+            console.log('[ARGUS] Images registered:', imageResults);
+        } catch (err) {
+            console.error('[ARGUS] Image send failed:', err);
+            errors.push(`Images: ${err.message}`);
+        }
+    }
+
+    for (const videoFile of (videoFiles || [])) {
+        try {
+            const result = await sendVideoToModel(videoFile, caseId, name);
+            if (result) videoResults.push(result);
+            console.log(`[ARGUS] Video registered: ${videoFile.name}`, result);
+        } catch (err) {
+            console.error(`[ARGUS] Video send failed "${videoFile.name}":`, err);
+            errors.push(`Video (${videoFile.name}): ${err.message}`);
+        }
+    }
+
+    if (imageResults || videoResults.length > 0) {
+        try {
+            await saveModelResultsToFirestore(caseId, imageResults, videoResults);
+        } catch (err) {
+            console.error('[ARGUS] Firestore save failed:', err);
+            errors.push(`Firestore: ${err.message}`);
+        }
+    }
+
+    return { success: errors.length === 0, errors };
+}

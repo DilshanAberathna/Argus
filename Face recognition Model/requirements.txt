@@ -1,0 +1,21 @@
+# Verified working combination (installed and end-to-end tested on Python 3.12,
+# Ubuntu 24, CPU-only). Newer patch versions will very likely work too; these
+# are pins for reproducibility, not hard upper bounds.
+
+insightface==1.0.1
+onnxruntime==1.24.4
+opencv-python==4.13.0.92
+numpy==2.4.4
+faiss-cpu==1.14.3
+
+# Not imported directly, but documented here because it matters:
+# insightface's own install_requires pulls in `opencv-python` (the GUI-capable
+# build, not headless) regardless of what you install alongside it. That's fine
+# for this project -- nothing in this codebase ever calls cv2.imshow() or any
+# other GUI/highgui function, so it runs correctly on headless servers/containers
+# even though the GUI-capable wheel is present. scikit-image, onnx, scipy,
+# requests and tqdm are also pulled in transitively by insightface; you don't
+# need to (and shouldn't) pin them separately.
+
+# Standard library, listed for completeness -- do not pip install:
+#   sqlite3 (metadata storage), argparse, glob, json, sqlite3, warnings

@@ -1,4 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
+// Provides Firebase-backed authentication, session management, and role-based login/logout logic for ARGUS operators.
+
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { db } from '../firebaseConfig';
 import { collection, query, where, getDocs, doc, setDoc, onSnapshot, getDoc, deleteDoc } from 'firebase/firestore';
@@ -14,10 +16,8 @@ export const AuthProvider = ({ children }) => {
     const [currentUser, setCurrentUser] = useState(null);
     const [loading, setLoading] = useState(true);
 
-    // 1. Seed database with default admin & investigator if collections are empty
     const seedDatabase = async () => {
         try {
-            // Check & seed root admin 1 (original admin)
             const admin1Ref = doc(db, 'admins', 'admin_root');
             const admin1Snap = await getDoc(admin1Ref);
             if (!admin1Snap.exists()) {
@@ -37,7 +37,6 @@ export const AuthProvider = ({ children }) => {
                 console.log('Updated first root admin role to Root Admin.');
             }
 
-            // Remove legacy second default root admin (root.admin) if it exists, ensuring only 1 default root admin is kept
             const admin2Ref = doc(db, 'admins', 'root_admin');
             const admin2Snap = await getDoc(admin2Ref);
             if (admin2Snap.exists()) {
@@ -49,7 +48,6 @@ export const AuthProvider = ({ children }) => {
         }
     };
 
-    // Initialize session and seed database on mount
     useEffect(() => {
         const checkSessionAndSeed = async () => {
             await seedDatabase();
@@ -72,7 +70,6 @@ export const AuthProvider = ({ children }) => {
                             sessionStorage.removeItem('argus_current_user');
                             setCurrentUser(null);
                         } else {
-                            // Update cached information with live data
                             const updatedUser = {
                                 ...parsedUser,
                                 id: querySnapshot.docs[0].id,
@@ -86,13 +83,11 @@ export const AuthProvider = ({ children }) => {
                             setCurrentUser(updatedUser);
                         }
                     } else {
-                        // User no longer exists in Firestore
                         sessionStorage.removeItem('argus_current_user');
                         setCurrentUser(null);
                     }
                 } catch (err) {
                     console.error('Error verifying user session:', err);
-                    // Fallback to cache if offline
                     setCurrentUser(parsedUser);
                 }
             }
@@ -134,13 +129,11 @@ export const AuthProvider = ({ children }) => {
         return () => unsubscribe();
     }, [currentUser]);
 
-    // 2. Custom Login Logic querying Firestore
     const login = async (username, password, role) => {
         if (!role) {
             throw new Error('System access role selection is required.');
         }
 
-        // Use clean username
         const formattedUsername = username.trim().toLowerCase();
 
         const roleLower = role.toLowerCase();
@@ -156,42 +149,35 @@ export const AuthProvider = ({ children }) => {
             throw new Error('Operator account not found.');
         }
 
-        // Get matching document
         const userDoc = querySnapshot.docs[0];
         const userData = userDoc.data();
 
-        // Enforce account status check
         if (userData.status === 'Suspended') {
             throw new Error('Account suspended. Contact administration.');
         }
 
-        // Enforce password check
         if (userData.password !== password) {
             throw new Error('Invalid credentials.');
         }
 
-        // Session data to cache
         const loggedUser = {
             id: userDoc.id,
             name: userData.name,
-            email: userData.username, // mapping for route guard compatibilities
+            email: userData.username,
             username: userData.username,
             nic: userData.nic,
             image: userData.image,
             role: userData.role || roleLower
         };
 
-        // Cache and set state
         sessionStorage.setItem('argus_current_user', JSON.stringify(loggedUser));
         setCurrentUser(loggedUser);
 
-        // Record login event in system logs
         addLog('info', `Operator ${loggedUser.username} logged in successfully`, `User ${loggedUser.name} (${loggedUser.role}) authenticated via credential verification. Session started.`, loggedUser.username);
 
         return loggedUser;
     };
 
-    // 3. Logout logic
     const logout = async () => {
         const username = currentUser?.username || 'unknown';
         const name = currentUser?.name || 'Unknown';
@@ -199,7 +185,6 @@ export const AuthProvider = ({ children }) => {
         sessionStorage.removeItem('argus_current_user');
         setCurrentUser(null);
 
-        // Record logout event in system logs
         addLog('info', `Operator ${username} logged out`, `User ${name} ended their session and was signed out of the system.`, username);
     };
 

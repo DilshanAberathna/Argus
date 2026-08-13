@@ -1,3 +1,4 @@
+// Guards routes by verifying session role and live Firestore account status, redirecting unauthorized or suspended users.
 import React, { useEffect } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -45,7 +46,6 @@ const ProtectedRoute = ({ children, allowedRole }) => {
 
     const userRole = (currentUser.role || '').toLowerCase();
     
-    // Strict isolation checks based on session role
     if (allowedRole === 'admin' && userRole !== 'admin' && userRole !== 'root admin') {
         if (userRole === 'investigator') {
             return <Navigate to="/dashboard" />;

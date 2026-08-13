@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Bell, User as UserIcon, PlusCircle, XCircle, Play, CheckCircle, Trash2, MapPin, Navigation, Loader } from 'lucide-react';
+import { ArrowLeft, Bell, User as UserIcon, PlusCircle, XCircle, Play, CheckCircle, Trash2, MapPin, Navigation, Loader, Brain } from 'lucide-react';
 import { db, storage } from '../firebaseConfig';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
@@ -9,6 +9,7 @@ import Notifications from './Notifications';
 import UserProfileModal from './UserProfileModal';
 import { useAuth } from '../contexts/AuthContext';
 import { getDeviceGPS, reverseGeocode } from '../utils/geoService';
+import { sendMediaToModel } from '../utils/embeddingService';
 import './ReportCase.css';
 import './History.css'; 
 
@@ -35,6 +36,9 @@ const ReportCase = () => {
     const [showProfile, setShowProfile] = useState(false);
     const [isUploading, setIsUploading] = useState(false);
     const [isDetectingGPS, setIsDetectingGPS] = useState(false);
+    // Tracks the current processing phase shown in the loading modal
+    // Possible values: null | 'uploading' | 'extracting' | 'done'
+    const [processingPhase, setProcessingPhase] = useState(null);
 
     const imageInputRef = useRef(null);
     const videoInputRef = useRef(null);
@@ -125,12 +129,13 @@ const ReportCase = () => {
         }
 
         setIsUploading(true);
+        setProcessingPhase('uploading');
 
         try {
             const caseId = formData.caseId;
             console.log('Submitting case', caseId, 'NIC', formData.nic);
 
-            
+            // ── Step 1: Upload images to Firebase Storage ──────────────────
             const imageUrls = [];
             for (let i = 0; i < images.length; i++) {
                 const file = images[i];
@@ -144,7 +149,7 @@ const ReportCase = () => {
                 imageUrls.push(url);
             }
 
-            
+            // ── Step 2: Upload videos to Firebase Storage ──────────────────
             const videoUrls = [];
             for (let i = 0; i < videos.length; i++) {
                 const file = videos[i];
@@ -158,7 +163,7 @@ const ReportCase = () => {
                 videoUrls.push(url);
             }
 
-            
+            // ── Step 3: Save case and media records to Firestore ───────────
             const lastSeenLocation = {
                 name: formData.locationName,
                 lat: parseFloat(formData.latitude),
@@ -175,7 +180,6 @@ const ReportCase = () => {
                 createdAt: serverTimestamp()
             });
 
-            
             const mediaRef = doc(db, 'person_media', caseId);
             await setDoc(mediaRef, {
                 caseId: caseId,
@@ -186,7 +190,24 @@ const ReportCase = () => {
                 createdAt: serverTimestamp()
             });
 
-            
+            // ── Step 4: Send files to face recognition API for embeddings ──
+            // This runs AFTER Firebase upload so the case is always saved
+            // even if the face recognition API is temporarily unavailable.
+            setProcessingPhase('extracting');
+            const modelResult = await sendMediaToModel(caseId, formData.name, images, videos);
+
+            if (!modelResult.success) {
+                // Non-blocking — case is always saved even if the ML model is unreachable
+                console.warn('[ARGUS] ML model had errors:', modelResult.errors);
+                alert(
+                    `Case saved successfully!\n\n` +
+                    `⚠️ Face recognition model encountered issues:\n${modelResult.errors.join('\n')}\n\n` +
+                    `Make sure the face recognition API server is running:\n  python -m uvicorn main:app --port 8000`
+                );
+            } else {
+                console.log('[ARGUS] Media sent to ML model successfully.');
+            }
+
             setShowSuccessModal(true);
         } catch (error) {
             if (error.code === 'storage/canceled') {
@@ -197,6 +218,7 @@ const ReportCase = () => {
             }
         } finally {
             setIsUploading(false);
+            setProcessingPhase(null);
             uploadTasksRef.current = [];
         }
     };
@@ -447,9 +469,26 @@ const ReportCase = () => {
                 <div className="modal-overlay">
                     <div className="success-modal" style={{ textAlign: 'center' }}>
                         <div className="spinner"></div>
-                        <h3 style={{ color: 'var(--ice)', marginTop: '1.5rem' }}>Uploading Data...</h3>
-                        <p style={{ marginTop: '1rem', color: 'var(--text-secondary)' }}>Please wait, securing case files...</p>
-                        <button className="cancel-upload-btn" onClick={handleCancelUpload}>Cancel Upload</button>
+
+                        {processingPhase === 'extracting' ? (
+                            <>
+                                <h3 style={{ color: 'var(--ice)', marginTop: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                                    <Brain size={22} color="#5ce1e6" /> Sending to ML Model...
+                                </h3>
+                                <p style={{ marginTop: '1rem', color: 'var(--text-secondary)' }}>
+                                    Transferring photos &amp; videos to the face recognition model.
+                                </p>
+                                <div style={{ marginTop: '0.75rem', padding: '0.5rem 1rem', background: 'rgba(92,225,230,0.08)', borderRadius: '6px', border: '1px solid rgba(92,225,230,0.2)' }}>
+                                    <span style={{ fontSize: '0.78rem', color: '#5ce1e6', fontWeight: '600' }}>🧠 Face Recognition Model Processing</span>
+                                </div>
+                            </>
+                        ) : (
+                            <>
+                                <h3 style={{ color: 'var(--ice)', marginTop: '1.5rem' }}>Uploading Data...</h3>
+                                <p style={{ marginTop: '1rem', color: 'var(--text-secondary)' }}>Please wait, securing case files...</p>
+                                <button className="cancel-upload-btn" onClick={handleCancelUpload}>Cancel Upload</button>
+                            </>
+                        )}
                     </div>
                 </div>
             )}

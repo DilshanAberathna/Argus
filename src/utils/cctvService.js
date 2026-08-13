@@ -1,10 +1,7 @@
+// Provides surveillance zone definitions, CCTV camera node data, and simulated detection alert logging for the ARGUS CCTV network.
+
 import { db } from '../firebaseConfig';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-
-/**
- * Standardized Zone-Based CCTV Surveillance Architecture for ARGUS
- * Defines geographical surveillance zones and deployed camera nodes across key Sri Lankan transit hubs.
- */
 
 export const SURVEILLANCE_ZONES = [
     {
@@ -124,10 +121,6 @@ export const CCTV_CAMERAS = [
     }
 ];
 
-/**
- * Trigger an artificial AI camera sighting alert for demonstration purposes.
- * Simulates a computer vision facial recognition match occurring at a specified CCTV node.
- */
 export const triggerSimulatedDetection = async (cameraObj, targetCase) => {
     try {
         const detectionRef = collection(db, 'detections');

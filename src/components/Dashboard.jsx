@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { 
-    User, Bell, Search, Video, Clock, Activity, 
-    ShieldAlert, Eye, MapPin, ChevronRight, Radio 
+import {
+    User, Bell, Search, Video, Clock, Activity,
+    ShieldAlert, Eye, MapPin, ChevronRight, Radio
 } from 'lucide-react';
 import logo from '../assets/logo.png';
 import './Dashboard.css';
@@ -106,7 +106,6 @@ const Dashboard = () => {
                 <div className="header-left">
                     <img src={logo} alt="Argus Logo" className="header-logo" />
                     <span className="header-title">ARGUS COMMAND CONSOLE</span>
-                    <span className="header-badge">INVESTIGATOR PANEL</span>
                 </div>
                 <div className="header-right">
                     <div className="user-profile" onClick={() => setShowProfile(true)} title="View Operator Profile">
@@ -153,7 +152,6 @@ const Dashboard = () => {
                                 <Radio className="pulsing-radio" size={16} />
                                 <span>CCTV SURVEILLANCE GRID ACTIVE</span>
                             </div>
-                            <span className="zone-ready-text">Awaiting Custom Camera Zone Architecture</span>
                         </div>
                     </div>
                 </section>

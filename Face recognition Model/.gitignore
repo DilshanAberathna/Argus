@@ -1,0 +1,20 @@
+# Downloaded model weights (auto-fetched on first run, ~280MB+ -- don't commit)
+models/insightface_models/
+
+# Runtime-generated data (your enrolled faces -- almost certainly don't want
+# this in version control / shared publicly)
+data/*.db
+data/*.index
+data/*.db-journal
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+*.egg-info/
+.venv/
+venv/
+
+# OS
+.DS_Store

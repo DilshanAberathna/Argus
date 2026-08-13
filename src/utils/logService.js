@@ -1,6 +1,4 @@
-// Centralized logging service for ARGUS system
-// All components import and call addLog() to record mandatory events.
-// LogViewer listens for 'argus-log-update' custom events to refresh in real-time.
+// Centralized localStorage-backed logging service that persists system events and dispatches real-time updates for the LogViewer.
 
 const STORAGE_KEY = 'argus_system_logs_live';
 
@@ -22,7 +20,7 @@ export const addLog = (level, message, details = '', user = 'system', ip = 'loca
     const newLog = {
         id: Date.now(),
         timestamp: getTimestamp(),
-        level,        // 'info' | 'warning' | 'critical'
+        level,
         category: 'SYSTEM',
         message,
         user,
@@ -33,7 +31,6 @@ export const addLog = (level, message, details = '', user = 'system', ip = 'loca
     const updated = [newLog, ...logs];
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
 
-    // Dispatch custom event so LogViewer can react in real-time
     window.dispatchEvent(new CustomEvent('argus-log-update', { detail: newLog }));
 
     return newLog;

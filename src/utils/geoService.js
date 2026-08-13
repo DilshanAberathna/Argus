@@ -1,10 +1,8 @@
+// Provides GPS coordinate capture, reverse geocoding via Nominatim, and Firestore detection alert logging for surveillance tracking.
+
 import { db } from '../firebaseConfig';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 
-/**
- * Capture real-time device GPS coordinates via HTML5 Geolocation API.
- * Returns a Promise resolving to { lat, lng, accuracy }.
- */
 export const getDeviceGPS = () => {
     return new Promise((resolve, reject) => {
         if (!navigator.geolocation) {
@@ -29,9 +27,6 @@ export const getDeviceGPS = () => {
 
 export const getCurrentDevicePosition = getDeviceGPS;
 
-/**
- * Convert Latitude & Longitude to physical street/district address using OpenStreetMap Nominatim API.
- */
 export const reverseGeocode = async (lat, lng) => {
     try {
         const response = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}`, {
@@ -58,9 +53,6 @@ export const reverseGeocode = async (lat, lng) => {
     }
 };
 
-/**
- * Register a real-time surveillance camera detection alert for Police Pursuit & Trail Mapping.
- */
 export const logCameraDetection = async (caseId, victimName, cameraId, locationName, lat, lng, confidenceScore = 0.92) => {
     try {
         const detectionRef = collection(db, 'detections');

@@ -1,33 +1,46 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
     ArrowLeft, Video, Radio, Plus, MapPin, Wifi, 
-    Cpu, Eye, X, AlertTriangle, CheckCircle, Bell, User as UserIcon 
+    Cpu, Eye, X, Bell, User as UserIcon 
 } from 'lucide-react';
-import { SURVEILLANCE_ZONES, CCTV_CAMERAS as INITIAL_CAMERAS, triggerSimulatedDetection } from '../utils/cctvService';
+import { SURVEILLANCE_ZONES, CCTV_CAMERAS as INITIAL_CAMERAS } from '../utils/cctvService';
 import { getDeviceGPS } from '../utils/geoService';
-import { db } from '../firebaseConfig';
-import { collection, getDocs } from 'firebase/firestore';
 import logo from '../assets/logo.png';
 import Notifications from './Notifications';
 import UserProfileModal from './UserProfileModal';
 import { useAuth } from '../contexts/AuthContext';
+import { useGait } from '../contexts/GaitContext';
 import './CctvNetwork.css';
 import './History.css';
+
+const loadInitialCameras = () => {
+    const storedCustom = localStorage.getItem('argus_custom_cctv_nodes');
+    let parsedCustom = [];
+    if (storedCustom) {
+        try {
+            parsedCustom = JSON.parse(storedCustom);
+        } catch (err) {
+            console.error("Error parsing custom CCTV nodes:", err);
+        }
+    }
+    return [...INITIAL_CAMERAS, ...parsedCustom];
+};
 
 const CctvNetwork = ({ isAdmin = false }) => {
     const navigate = useNavigate();
     const { currentUser } = useAuth();
+    const { events, cameras: activeGaitCameras, startCamera, stopCamera } = useGait();
+
     const [showNotifications, setShowNotifications] = useState(false);
     const [showProfile, setShowProfile] = useState(false);
     const [activeZoneId, setActiveZoneId] = useState(SURVEILLANCE_ZONES[0]?.id || 'Z01');
-    const [allCameras, setAllCameras] = useState([]);
-    const [casesList, setCasesList] = useState([]);
+    const [allCameras, setAllCameras] = useState(loadInitialCameras);
     const [showAddModal, setShowAddModal] = useState(false);
     const [selectedCamStream, setSelectedCamStream] = useState(null);
     const [isDetectingGPS, setIsDetectingGPS] = useState(false);
 
-    const [newCam, setNewCam] = useState({
+    const createInitialCamState = () => ({
         id: `CCTV-${Math.floor(100 + Math.random() * 900)}`,
         name: '',
         lat: '',
@@ -37,292 +50,224 @@ const CctvNetwork = ({ isAdmin = false }) => {
         status: 'ONLINE'
     });
 
-    // Load cameras from initial config + localStorage for custom added nodes
-    useEffect(() => {
-        const storedCustom = localStorage.getItem('argus_custom_cctv_nodes');
-        let parsedCustom = [];
-        if (storedCustom) {
-            try {
-                parsedCustom = JSON.parse(storedCustom);
-            } catch (e) {
-                console.error("Error parsing custom CCTV nodes:", e);
-            }
-        }
-        setAllCameras([...INITIAL_CAMERAS, ...parsedCustom]);
-    }, []);
-
-    // Fetch active cases from Firestore to feed realistic AI simulations
-    useEffect(() => {
-        const fetchCases = async () => {
-            try {
-                const snapshot = await getDocs(collection(db, 'victims'));
-                const list = [];
-                snapshot.forEach(doc => {
-                    list.push({ id: doc.id, ...doc.data() });
-                });
-                setCasesList(list);
-            } catch (error) {
-                console.error("Error loading target cases:", error);
-            }
-        };
-        fetchCases();
-    }, []);
+    const [newCam, setNewCam] = useState(createInitialCamState);
 
     const activeZone = SURVEILLANCE_ZONES.find(z => z.id === activeZoneId) || SURVEILLANCE_ZONES[0];
-    const activeZoneCameras = allCameras.filter(cam => cam.zoneId === activeZoneId);
-
-    const handleSimulateAlert = async (cam) => {
-        try {
-            const targetSubject = casesList.length > 0 
-                ? casesList[Math.floor(Math.random() * casesList.length)] 
-                : { id: 'DEMO-TARGET', name: 'Simulated Target Subject (Demo)' };
-
-            await triggerSimulatedDetection(cam, targetSubject);
-            alert(`🚨 AI SURVEILLANCE ALARM TRIGGERED!\n\nCamera Node: [${cam.id}] ${cam.name}\nTarget Matched: ${targetSubject.name || 'Subject'}\n\nLive GPS coordinates and pursuit path have been broadcasted to the main ARGUS surveillance map!`);
-        } catch (err) {
-            alert("Simulation Failed: " + err.message);
-        }
-    };
+    const currentZoneCameras = allCameras.filter(c => c.zoneId === activeZoneId || (!c.zoneId && activeZoneId === 'Z01'));
 
     const handleAutoDetectGPS = async () => {
         setIsDetectingGPS(true);
-        try {
-            const pos = await getDeviceGPS();
+        const locationData = await getDeviceGPS();
+        setIsDetectingGPS(false);
+
+        if (locationData && locationData.lat && locationData.lng) {
             setNewCam(prev => ({
                 ...prev,
-                lat: pos.lat.toFixed(6),
-                lng: pos.lng.toFixed(6)
+                lat: locationData.lat.toFixed(6),
+                lng: locationData.lng.toFixed(6)
             }));
-        } catch (err) {
-            alert("Unable to acquire GPS coordinates: " + err.message);
-        } finally {
-            setIsDetectingGPS(false);
+        } else {
+            alert("Could not detect precise device GPS location. Please enter manually.");
         }
     };
 
     const handleAddCameraSubmit = (e) => {
         e.preventDefault();
         if (!newCam.name || !newCam.lat || !newCam.lng) {
-            alert("Please fill in camera landmark name and GPS coordinates.");
+            alert("Please complete landmark name and GPS coordinates.");
             return;
         }
 
-        const newCamObj = {
-            ...newCam,
+        const cameraNode = {
+            id: newCam.id,
+            name: newCam.name,
+            zoneId: activeZoneId,
+            status: newCam.status,
+            resolution: newCam.resolution,
             lat: parseFloat(newCam.lat),
             lng: parseFloat(newCam.lng),
-            zoneId: activeZoneId
+            ip: newCam.ip,
+            isCustom: true
         };
 
-        const updatedAll = [...allCameras, newCamObj];
-        setAllCameras(updatedAll);
+        const existingCustomStr = localStorage.getItem('argus_custom_cctv_nodes');
+        let existingCustom = [];
+        if (existingCustomStr) {
+            try { existingCustom = JSON.parse(existingCustomStr); } catch (err) { console.error(err); }
+        }
+        const updatedCustom = [cameraNode, ...existingCustom];
+        localStorage.setItem('argus_custom_cctv_nodes', JSON.stringify(updatedCustom));
 
-        // Store custom added cameras separately to localStorage
-        const customOnly = updatedAll.filter(c => !INITIAL_CAMERAS.some(ic => ic.id === c.id));
-        localStorage.setItem('argus_custom_cctv_nodes', JSON.stringify(customOnly));
-
+        setAllCameras(prev => [cameraNode, ...prev]);
         setShowAddModal(false);
-        setNewCam({
-            id: `CCTV-${Math.floor(100 + Math.random() * 900)}`,
-            name: '',
-            lat: '',
-            lng: '',
-            resolution: '4K IR PTZ Stream & AI Face Recognition',
-            ip: `192.168.${Math.floor(10 + Math.random() * 80)}.${Math.floor(10 + Math.random() * 240)}`,
-            status: 'ONLINE'
-        });
+        setNewCam(createInitialCamState());
+        alert(`Node ${cameraNode.id} deployed to ${activeZone.name}`);
     };
 
-    return (
-        <div className="cctv-network-container">
-            <Notifications isOpen={showNotifications} onClose={() => setShowNotifications(false)} />
-            <UserProfileModal isOpen={showProfile} onClose={() => setShowProfile(false)} />
+    const isGaitWorkerActive = (camId) => {
+        return activeGaitCameras.some(c => c.camera_id === camId && c.status === 'ACTIVE');
+    };
 
-            <header className="history-header">
-                <div className="history-header-left">
-                    <button className="history-back-btn" onClick={() => navigate(isAdmin ? '/admin/dashboard' : '/dashboard')}>
-                        <ArrowLeft size={24} />
+    const toggleGaitWorker = async (cam) => {
+        if (isGaitWorkerActive(cam.id)) {
+            await stopCamera(cam.id);
+        } else {
+            await startCamera(cam.id, cam.ip || '0', cam.name);
+        }
+    };
+
+    const streamEvents = selectedCamStream
+        ? events.filter(e => e.camera_id === selectedCamStream.id || e.camera_id === 'upload-image')
+        : [];
+
+    return (
+        <div className="cctv-page-container">
+            <header className="command-header">
+                <div className="header-brand-group">
+                    <button className="icon-btn back-btn" onClick={() => navigate(isAdmin ? '/admin/dashboard' : '/dashboard')} title="Return to Dashboard">
+                        <ArrowLeft size={20} />
                     </button>
-                    <img src={logo} alt="Argus Logo" className="history-logo" />
-                    <span className="history-title-text">ARGUS</span>
-                </div>
-                <div className="history-header-right">
-                    <div className="user-profile" onClick={() => setShowProfile(true)} style={{ cursor: 'pointer' }}>
-                        <UserIcon size={22} fill="#d6e4ea" color="#d6e4ea" />
-                        <span>{currentUser?.username || 'Operator'}</span>
+                    <img src={logo} alt="ARGUS Logo" className="header-logo" />
+                    <div className="brand-titles">
+                        <span className="system-code">ARGUS-V0.1 // SURVEILLANCE GRID</span>
+                        <h1 className="header-title">CCTV SENTINEL NETWORK & ZONES</h1>
                     </div>
-                    <Bell
-                        size={22}
-                        className="notification-bell"
-                        fill="#5ce1e6"
-                        color="#5ce1e6"
-                        onClick={() => setShowNotifications(true)}
-                        style={{ cursor: 'pointer' }}
-                    />
+                </div>
+
+                <div className="header-controls-group">
+                    <div className="notification-wrapper">
+                        <button className="icon-btn notification-btn" onClick={() => setShowNotifications(!showNotifications)}>
+                            <Bell size={18} />
+                        </button>
+                        {showNotifications && <Notifications onClose={() => setShowNotifications(false)} />}
+                    </div>
+
+                    <div className="user-profile-widget" onClick={() => setShowProfile(true)}>
+                        <div className="avatar-circle">
+                            <UserIcon size={16} />
+                        </div>
+                        <div className="user-text-info">
+                            <span className="user-name">{currentUser?.displayName || currentUser?.email || 'Operator'}</span>
+                            <span className="user-role">{isAdmin ? 'ADMINISTRATOR' : 'INVESTIGATOR'}</span>
+                        </div>
+                    </div>
                 </div>
             </header>
 
-            <main className="cctv-body">
-                <div className="cctv-header-banner" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', paddingBottom: '16px', borderBottom: '1px solid rgba(0,229,255,0.15)', flexWrap: 'wrap', gap: '12px' }}>
-                    <div>
-                        <h1 style={{ fontSize: '1.75rem', fontWeight: '700', color: '#ffffff', margin: 0, display: 'flex', alignItems: 'center', gap: '12px' }}>
-                            <Video size={28} color="#00E5FF" />
-                            <span>CCTV Zones</span>
-                        </h1>
-                        <p style={{ margin: '4px 0 0 0', fontSize: '0.9rem', color: 'rgba(255,255,255,0.6)' }}>
-                            Geospatial AI camera sector management and automated pursuit alert telemetry
-                        </p>
+            {showProfile && (
+                <UserProfileModal 
+                    user={currentUser} 
+                    role={isAdmin ? 'admin' : 'investigator'} 
+                    onClose={() => setShowProfile(false)}
+                    onLogout={() => navigate('/')} 
+                />
+            )}
+
+            <main className="cctv-workspace">
+                <aside className="cctv-sidebar-zones">
+                    <div className="zones-sidebar-header">
+                        <h3>SURVEILLANCE SECTORS</h3>
+                        <span>{SURVEILLANCE_ZONES.length} Active Zones</span>
                     </div>
-                    <div className="nav-stats-pills" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-                        <div className="status-pill active">
-                            <span className="status-dot"></span>
-                            <span>AI Recognition Engine: 36 FPS [ONLINE]</span>
-                        </div>
-                        <div className="status-pill">
-                            <Wifi size={14} color="#00E5FF" />
-                            <span>Active Nodes: {allCameras.length}</span>
-                        </div>
-                        <div className="status-pill">
-                            <Radio size={14} color="#5CE1E6" />
-                            <span>Zones Configured: {SURVEILLANCE_ZONES.length}</span>
-                        </div>
-                    </div>
-                </div>
-                {/* Zone Sector Tabs */}
-                <div className="zone-tabs-section">
-                    <div className="tabs-list">
-                        {SURVEILLANCE_ZONES.map((z) => {
-                            const isSelected = z.id === activeZoneId;
-                            const count = allCameras.filter(c => c.zoneId === z.id).length;
+
+                    <div className="zones-list-group">
+                        {SURVEILLANCE_ZONES.map((zone) => {
+                            const zoneCams = allCameras.filter(c => c.zoneId === zone.id || (!c.zoneId && zone.id === 'Z01'));
+                            const onlineCount = zoneCams.filter(c => c.status === 'ONLINE').length;
+                            const isActive = activeZoneId === zone.id;
+
                             return (
-                                <button
-                                    key={z.id}
-                                    type="button"
-                                    className={`zone-tab-btn ${isSelected ? 'selected' : ''}`}
-                                    onClick={() => setActiveZoneId(z.id)}
+                                <div 
+                                    key={zone.id} 
+                                    className={`zone-item-card ${isActive ? 'active' : ''}`}
+                                    onClick={() => setActiveZoneId(zone.id)}
                                 >
-                                    <Radio size={16} color={isSelected ? '#00E5FF' : '#888'} />
-                                    <span>{z.id}: {z.name.split('(')[0].trim()} ({count})</span>
-                                </button>
+                                    <div className="zone-card-top">
+                                        <span className="zone-id-badge">{zone.id}</span>
+                                        <span className="zone-status-pill">
+                                            <Wifi size={12} /> {onlineCount}/{zoneCams.length} Online
+                                        </span>
+                                    </div>
+                                    <h4 className="zone-name-title">{zone.name}</h4>
+                                    <p className="zone-desc-text">{zone.description}</p>
+                                </div>
                             );
                         })}
                     </div>
-                    <button 
-                        className="deploy-cam-btn"
-                        onClick={() => setShowAddModal(true)}
-                    >
-                        <Plus size={18} />
-                        <span>Deploy CCTV Node in {activeZone.id}</span>
-                    </button>
-                </div>
+                </aside>
 
-                {/* Active Zone Summary Card */}
-                <div className="zone-summary-card">
-                    <div className="zone-summary-left">
-                        <h2>{activeZone.name}</h2>
-                        <p>{activeZone.description || 'High-density commercial and transit junction equipped with real-time biometric video surveillance and automated alert broadcasting.'}</p>
-                    </div>
-                    <div className="zone-summary-right">
-                        <div className="zone-metric-box">
-                            <span className="metric-label">Sector Radius</span>
-                            <span className="metric-value">{Math.round((activeZone.radius || 4000)/1000)} km</span>
-                        </div>
-                        <div className="zone-metric-box">
-                            <span className="metric-label">Sector Center GPS</span>
-                            <span className="metric-value" style={{ fontSize: '1rem', fontFamily: 'monospace' }}>
-                                {activeZone.center[0].toFixed(4)}° N, {activeZone.center[1].toFixed(4)}° E
-                            </span>
-                        </div>
-                        <div className="zone-metric-box">
-                            <span className="metric-label">Operational Status</span>
-                            <span className="metric-value" style={{ color: '#4CAF50' }}>ACTIVE</span>
-                        </div>
-                    </div>
-                </div>
-
-                {/* CCTV Cameras Grid */}
-                <section className="cctv-grid-section">
-                    <div className="cctv-grid-header">
-                        <h3>Deployed Camera Nodes in {activeZone.name.split('(')[0]} ({activeZoneCameras.length})</h3>
-                    </div>
-
-                    <div className="cameras-grid">
-                        {activeZoneCameras.length === 0 ? (
-                            <div style={{ color: '#888', padding: '2rem 0' }}>
-                                No surveillance nodes currently deployed in this sector. Use "Deploy CCTV Node" to add simulated hardware.
+                <section className="cctv-main-content">
+                    <div className="cctv-zone-header-banner">
+                        <div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                                <h2>{activeZone.name} ({activeZone.id})</h2>
+                                <span className="grid-status-live">
+                                    <Radio size={14} className="activity-spin" /> SENTINEL GRID ACTIVE
+                                </span>
                             </div>
-                        ) : (
-                            activeZoneCameras.map((cam) => (
-                                <div key={cam.id} className="cctv-camera-card">
-                                    <div className="cam-card-header">
-                                        <span className="cam-id-tag">{cam.id}</span>
-                                        <span className="cam-status-indicator">
-                                            <span className="status-dot"></span>
-                                            {cam.status || 'ONLINE'}
+                            <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', margin: '0.25rem 0 0 0' }}>
+                                {activeZone.description} | Installed Sentinel Nodes: <strong>{currentZoneCameras.length}</strong>
+                            </p>
+                        </div>
+
+                        {isAdmin && (
+                            <button className="btn-add-cctv-node" onClick={() => setShowAddModal(true)}>
+                                <Plus size={16} /> Deploy New CCTV Node
+                            </button>
+                        )}
+                    </div>
+
+                    <div className="cctv-grid-nodes">
+                        {currentZoneCameras.map((cam) => {
+                            const isGaitActive = isGaitWorkerActive(cam.id);
+                            return (
+                                <div key={cam.id} className="cctv-node-card">
+                                    <div className="node-card-header">
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                            <Video size={16} color={cam.status === 'ONLINE' ? '#00E5FF' : '#FF5252'} />
+                                            <span className="node-id-tag">{cam.id}</span>
+                                            {cam.isCustom && <span className="custom-badge-cctv">CUSTOM</span>}
+                                        </div>
+                                        <span className={`node-status-badge ${cam.status.toLowerCase()}`}>
+                                            {cam.status}
                                         </span>
                                     </div>
-                                    
-                                    <div className="cam-card-body">
-                                        <h4>{cam.name}</h4>
-                                        
-                                        {/* Simulated AI Video Interface */}
-                                        <div className="simulated-feed-box">
-                                            <div className="feed-watermark">
-                                                <span>REC ⬤ [AI ENGINE ACTIVE]</span>
-                                                <span>{new Date().toLocaleTimeString()}</span>
-                                            </div>
-                                            
-                                            <div className="radar-target-box">
-                                                <span>⚡ SCANNING FOR BIOMETRIC MATCHES...</span>
-                                            </div>
 
-                                            <div className="feed-telemetry">
-                                                IP: {cam.ip || '192.168.1.100'} | FPS: 36 | YOLOv8-Vision
-                                            </div>
+                                    <div className="node-card-body">
+                                        <h4 className="node-title">{cam.name}</h4>
+                                        <div className="node-meta-row">
+                                            <span><MapPin size={12} /> {cam.lat.toFixed(4)}, {cam.lng.toFixed(4)}</span>
+                                            <span><Wifi size={12} /> {cam.ip}</span>
                                         </div>
+                                        <div className="node-capability-tag">{cam.resolution}</div>
+                                    </div>
 
-                                        <div className="cam-specs-list">
-                                            <div className="spec-row">
-                                                <span>Resolution / Stream</span>
-                                                <span className="spec-val">{cam.resolution}</span>
-                                            </div>
-                                            <div className="spec-row">
-                                                <span>Coordinates</span>
-                                                <span className="spec-val" style={{ fontFamily: 'monospace' }}>
-                                                    {cam.lat.toFixed(4)}°, {cam.lng.toFixed(4)}°
-                                                </span>
-                                            </div>
-                                        </div>
-
-                                        <div className="cam-card-actions">
-                                            <button 
-                                                className="trigger-alarm-btn"
-                                                onClick={() => handleSimulateAlert(cam)}
-                                            >
-                                                <span>🚨 Simulate Recognition Alert Here</span>
-                                            </button>
-                                            
-                                            <button 
-                                                className="stream-details-btn"
-                                                onClick={() => setSelectedCamStream(cam)}
-                                            >
-                                                👁️ View Live Node Telemetry & Stream
-                                            </button>
-                                        </div>
+                                    <div className="node-card-actions" style={{ display: 'flex', gap: '0.5rem' }}>
+                                        <button className="btn-view-stream flex-1" onClick={() => setSelectedCamStream(cam)}>
+                                            <Eye size={14} /> Live Stream
+                                        </button>
+                                        <button 
+                                            className={`px-3 py-1.5 rounded text-xs font-bold transition-colors ${
+                                                isGaitActive ? 'bg-green-800 hover:bg-green-700 text-green-200' : 'bg-purple-900/80 hover:bg-purple-800 text-purple-200'
+                                            }`}
+                                            onClick={() => toggleGaitWorker(cam)}
+                                        >
+                                            {isGaitActive ? '🟢 Gait AI Active' : '▶️ Start Gait Worker'}
+                                        </button>
                                     </div>
                                 </div>
-                            ))
-                        )}
+                            );
+                        })}
                     </div>
                 </section>
             </main>
 
-            {/* Modal: View Focused Node Stream Telemetry */}
+            {/* Modal: Live Camera Stream Overlay */}
             {selectedCamStream && (
                 <div className="cctv-modal-overlay">
                     <div className="cctv-modal-card" style={{ maxWidth: '640px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '0.8rem' }}>
-                            <h3 style={{ margin: 0, border: 'none', padding: 0 }}>🎥 Node Stream Diagnostics: {selectedCamStream.id}</h3>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border)', paddingBottom: '0.75rem' }}>
+                            <h3 style={{ margin: 0 }}>Sentinel Stream: {selectedCamStream.id}</h3>
                             <button onClick={() => setSelectedCamStream(null)} style={{ background: 'transparent', border: 'none', color: '#fff', cursor: 'pointer' }}>
                                 <X size={24} />
                             </button>
@@ -331,28 +276,33 @@ const CctvNetwork = ({ isAdmin = false }) => {
                         <div style={{ padding: '1rem 0' }}>
                             <div className="simulated-feed-box" style={{ height: '260px', marginBottom: '1rem', border: '2px solid #00E5FF' }}>
                                 <div className="feed-watermark">
-                                    <span style={{ color: '#FF5252' }}>⬤ LIVE ENCRYPTED PROTOCOL STREAM</span>
-                                    <span>4K IR COLOR NIGHT-VISION</span>
+                                    <span style={{ color: '#FF5252' }}>🔴 LIVE ENCRYPTED PROTOCOL STREAM</span>
+                                    <span>ARGUS 2D GEI BIOMETRIC RECON</span>
                                 </div>
                                 <div style={{ alignSelf: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
                                     <Cpu size={36} color="#00E5FF" />
                                     <span style={{ color: '#00E5FF', fontWeight: '800', fontSize: '0.9rem' }}>
-                                        AI COMPUTER VISION EMBEDDED CHIP ONLINE
+                                        ARGUS GAIT RECONGNITION WORKER {isGaitWorkerActive(selectedCamStream.id) ? 'ONLINE' : 'STANDBY'}
                                     </span>
-                                    <span style={{ color: '#CCC', fontSize: '0.78rem' }}>
-                                        Continuous comparison against ARGUS active missing persons database
-                                    </span>
-                                </div>
-                                <div className="feed-telemetry" style={{ background: 'rgba(0, 229, 255, 0.15)', color: '#FFF' }}>
-                                    Bandwidth: 14.2 Mbps | Packet Loss: 0.0% | Encoding: H.265+ | Latency: 12ms
                                 </div>
                             </div>
+
+                            {streamEvents.length > 0 && (
+                                <div className="bg-gray-900 p-3 rounded-lg border border-gray-700 max-h-40 overflow-y-auto mb-3">
+                                    <div className="text-xs font-bold text-gray-400 mb-2 uppercase">Live Detection Stream</div>
+                                    {streamEvents.map(evt => (
+                                        <div key={evt.event_id} className="text-xs flex justify-between py-1 border-b border-gray-800">
+                                            <span className="font-semibold text-green-400">{evt.identity} ({evt.decision})</span>
+                                            <span className="font-mono text-cyan-400">{(evt.confidence * 100).toFixed(1)}% Match</span>
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
 
                             <div style={{ fontSize: '0.9rem', lineHeight: '1.6', color: 'var(--text-secondary)' }}>
                                 <div><strong>Landmark Installation:</strong> {selectedCamStream.name}</div>
                                 <div><strong>Assigned Sector:</strong> {activeZone.name}</div>
-                                <div><strong>Hardware IP Endpoint:</strong> <code>{selectedCamStream.ip}</code></div>
-                                <div><strong>Exact GPS Placement:</strong> <code>{selectedCamStream.lat}, {selectedCamStream.lng}</code></div>
+                                <div><strong>Hardware Endpoint:</strong> <code>{selectedCamStream.ip}</code></div>
                             </div>
                         </div>
 
@@ -429,7 +379,6 @@ const CctvNetwork = ({ isAdmin = false }) => {
                                 <option value="4K IR PTZ Stream & AI Face Recognition">4K IR PTZ Stream & AI Face Recognition</option>
                                 <option value="1080p LPR (License Plate) & Facial Analytics">1080p LPR (License Plate) & Facial Analytics</option>
                                 <option value="Thermal Infrared & Biometric Motion Tracking">Thermal Infrared & Biometric Motion Tracking</option>
-                                <option value="Ultra-HD Omni-Directional 360° AI Feed">Ultra-HD Omni-Directional 360° AI Feed</option>
                             </select>
                         </div>
 
@@ -447,7 +396,7 @@ const CctvNetwork = ({ isAdmin = false }) => {
                                 Cancel
                             </button>
                             <button type="submit" className="btn-submit-cctv">
-                                🚀 Confirm Node Deployment
+                                Confirm Node Deployment
                             </button>
                         </div>
                     </form>

@@ -12,6 +12,8 @@ import UserProfileModal from './UserProfileModal';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebaseConfig';
 import { collection, getDocs, onSnapshot, query } from 'firebase/firestore';
+import GaitSystemStatus from './GaitSystemStatus';
+import RecognitionEvents from './RecognitionEvents';
 
 const CountUp = ({ end, duration }) => {
     const [count, setCount] = useState(0);
@@ -102,19 +104,35 @@ const Dashboard = () => {
             <Notifications isOpen={showNotifications} onClose={() => setShowNotifications(false)} />
             <UserProfileModal isOpen={showProfile} onClose={() => setShowProfile(false)} />
 
-            <header className="dashboard-header">
-                <div className="header-left">
-                    <img src={logo} alt="Argus Logo" className="header-logo" />
-                    <span className="header-title">ARGUS COMMAND CONSOLE</span>
-                </div>
-                <div className="header-right">
-                    <div className="user-profile" onClick={() => setShowProfile(true)} title="View Operator Profile">
-                        <User size={20} fill="#a0e4e8" color="#a0e4e8" />
-                        <span>{currentUser?.username || 'Operator'}</span>
+            <header className="command-header">
+                <div className="header-brand-group">
+                    <img src={logo} alt="ARGUS Logo" className="header-logo" />
+                    <div className="brand-titles">
+                        <span className="system-code">ARGUS-V0.1 // COMMAND</span>
+                        <h1 className="header-title">MISSING PERSONS RECON SYSTEM</h1>
                     </div>
-                    <div className="notification-wrapper" onClick={() => setShowNotifications(true)} title="Notifications">
-                        <Bell size={20} className="notification-bell" fill="#5ce1e6" color="#5ce1e6" />
-                        {detections.length > 0 && <span className="notification-dot"></span>}
+                </div>
+
+                <div className="header-controls-group">
+                    <div className="user-profile-widget" onClick={() => setShowProfile(true)}>
+                        <div className="avatar-circle">
+                            <User size={16} />
+                        </div>
+                        <div className="user-text-info">
+                            <span className="user-name">{currentUser?.displayName || currentUser?.email || 'Officer'}</span>
+                            <span className="user-role">INVESTIGATOR</span>
+                        </div>
+                    </div>
+
+                    <div className="notification-wrapper">
+                        <button
+                            className="icon-btn notification-btn"
+                            onClick={() => setShowNotifications(!showNotifications)}
+                            title="Notifications"
+                        >
+                            <Bell size={18} />
+                            {detections.length > 0 && <span className="notification-badge">{detections.length}</span>}
+                        </button>
                     </div>
                 </div>
             </header>
@@ -152,12 +170,15 @@ const Dashboard = () => {
                                 <Radio className="pulsing-radio" size={16} />
                                 <span>CCTV SURVEILLANCE GRID ACTIVE</span>
                             </div>
+                            <span className="zone-ready-text">ARGUS Gait Biometric AI Integrated</span>
                         </div>
                     </div>
                 </section>
 
                 {/* RIGHT PANE: OPERATIONS DOCK & LIVE FEED */}
                 <aside className="operations-dock">
+                    <GaitSystemStatus />
+
                     <div className="quick-command-section">
                         <h3 className="dock-section-title">OPERATIONAL COMMANDS</h3>
                         <div className="command-cards-grid">
@@ -242,6 +263,8 @@ const Dashboard = () => {
                             )}
                         </div>
                     </div>
+
+                    <RecognitionEvents />
                 </aside>
             </main>
         </div>

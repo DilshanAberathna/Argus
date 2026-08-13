@@ -6,6 +6,8 @@ import Notifications from './Notifications';
 import UserProfileModal from './UserProfileModal';
 import { db } from '../firebaseConfig';
 import { collection, getDocs } from 'firebase/firestore';
+import { useAuth } from '../contexts/AuthContext';
+import { useGait } from '../contexts/GaitContext';
 import './History.css';
 
 const sortOptions = [
@@ -17,6 +19,9 @@ const sortOptions = [
 
 const History = () => {
     const navigate = useNavigate();
+    const { currentUser } = useAuth();
+    const { events: gaitEvents } = useGait();
+
     const [showNotifications, setShowNotifications] = useState(false);
     const [showProfile, setShowProfile] = useState(false);
     const [searchTerm, setSearchTerm] = useState('');
@@ -59,13 +64,14 @@ const History = () => {
                         name: data.name || 'Unnamed Case',
                         nic: data.nic || '',
                         status: data.status || 'Investigating',
-                        createdDate: createdDate,
+                        createdDate: createdDate
                     };
                 });
                 setCases(casesData);
+                setError(null);
             } catch (err) {
-                console.error("Error fetching cases:", err);
-                setError("Failed to load history cases.");
+                console.error("Error fetching cases history:", err);
+                setError("Failed to load historical case records.");
             } finally {
                 setIsLoading(false);
             }
@@ -75,7 +81,7 @@ const History = () => {
     }, []);
 
     const handleBack = () => {
-        navigate(-1);
+        navigate('/dashboard');
     };
 
     const handleClose = () => {
@@ -83,8 +89,7 @@ const History = () => {
     };
 
     const getStatusClass = (status) => {
-        if (!status) return '';
-        switch(status.toLowerCase()) {
+        switch (status?.toLowerCase()) {
             case 'investigating': return 'investigating';
             case 'cold': return 'cold';
             case 'found': return 'found';
@@ -95,8 +100,8 @@ const History = () => {
 
     const filteredAndSortedCases = cases.filter(c => {
         const term = searchTerm.toLowerCase();
-        return c.name.toLowerCase().includes(term) || 
-               c.nic.toLowerCase().includes(term) || 
+        return c.name.toLowerCase().includes(term) ||
+               c.nic.toLowerCase().includes(term) ||
                c.id.toLowerCase().includes(term);
     }).sort((a, b) => {
         if (sortBy === 'date-desc') {
@@ -117,7 +122,7 @@ const History = () => {
         <div className="history-page">
             <Notifications isOpen={showNotifications} onClose={() => setShowNotifications(false)} />
             <UserProfileModal isOpen={showProfile} onClose={() => setShowProfile(false)} />
-            
+
             <header className="history-header">
                 <div className="history-header-left">
                     <button className="history-back-btn" onClick={handleBack}>
@@ -129,12 +134,12 @@ const History = () => {
                 <div className="history-header-right">
                     <div className="user-profile" onClick={() => setShowProfile(true)} style={{ cursor: 'pointer' }}>
                         <UserIcon size={22} fill="#d6e4ea" color="#d6e4ea" />
-                        <span>John Doe</span>
+                        <span>{currentUser?.displayName || currentUser?.email || 'Officer'}</span>
                     </div>
-                    <Bell 
-                        size={22} 
-                        className="notification-bell" 
-                        fill="#5ce1e6" 
+                    <Bell
+                        size={22}
+                        className="notification-bell"
+                        fill="#5ce1e6"
                         color="#5ce1e6"
                         onClick={() => setShowNotifications(true)}
                         style={{ cursor: 'pointer' }}
@@ -145,15 +150,15 @@ const History = () => {
             <div className="history-controls">
                 <div className="search-bar">
                     <Search size={20} color="#6b7280" />
-                    <input 
-                        type="text" 
-                        placeholder="Search by Name, NIC, Case ID" 
+                    <input
+                        type="text"
+                        placeholder="Search by Name, NIC, Case ID"
                         value={searchTerm}
                         onChange={(e) => setSearchTerm(e.target.value)}
                     />
                 </div>
                 <div className="custom-dropdown-container" ref={dropdownRef}>
-                    <div 
+                    <div
                         className={`custom-dropdown-trigger ${isDropdownOpen ? 'active' : ''}`}
                         onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                     >
@@ -161,11 +166,11 @@ const History = () => {
                         <span>Sort by: {currentSortLabel}</span>
                         <ChevronDown size={20} className={`chevron-icon ${isDropdownOpen ? 'open' : ''}`} />
                     </div>
-                    
+
                     {isDropdownOpen && (
                         <div className="custom-dropdown-menu">
                             {sortOptions.map(option => (
-                                <div 
+                                <div
                                     key={option.value}
                                     className={`custom-dropdown-item ${sortBy === option.value ? 'selected' : ''}`}
                                     onClick={() => {
@@ -186,12 +191,12 @@ const History = () => {
                     <button className="history-close-btn" onClick={handleClose}>
                         <XCircle size={28} fill="#E53935" color="#ffffff" />
                     </button>
-                    
+
                     <div className="history-container-header">
                         <RotateCcw size={24} color="#4ab8bd" />
-                        <h2>History</h2>
+                        <h2>Investigation & Biometric Recognition History</h2>
                     </div>
-                    
+
                     <div className="cases-list">
                         {isLoading ? (
                             <div className="history-loading-container">
@@ -205,46 +210,70 @@ const History = () => {
                                 <h3>Error Fetching Cases</h3>
                                 <p>{error}</p>
                             </div>
-                        ) : filteredAndSortedCases.length === 0 ? (
+                        ) : filteredAndSortedCases.length === 0 && gaitEvents.length === 0 ? (
                             <div className="history-empty-container">
                                 <Search size={40} color="#5ce1e6" />
                                 <h3>No Cases Found</h3>
                                 <p>{searchTerm ? "No cases match your search query." : "There are currently no reported cases."}</p>
                             </div>
                         ) : (
-                            filteredAndSortedCases.map((c) => (
-                                <div 
-                                    className="case-card" 
-                                    key={c.id} 
-                                    onClick={() => navigate(`/case/${c.id}`)}
-                                    style={{ cursor: 'pointer' }}
-                                >
-                                    <div className="case-card-left">
-                                        <div className="case-avatar">
-                                            <UserIcon size={48} />
-                                        </div>
-                                        <div className="case-details">
-                                            <span>Case id : {c.id}</span>
-                                            <span>Case Name : {c.name}</span>
+                            <>
+                                {gaitEvents.length > 0 && (
+                                    <div style={{ marginBottom: '1.5rem', background: 'rgba(0,0,0,0.3)', padding: '1rem', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                                        <h3 style={{ fontSize: '1rem', color: 'var(--sky)', marginBottom: '0.75rem', fontWeight: 800 }}>
+                                            📡 Live Biometric Gait Recognition Logs ({gaitEvents.length})
+                                        </h3>
+                                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '200px', overflowY: 'auto' }}>
+                                            {gaitEvents.map(evt => (
+                                                <div key={evt.event_id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'var(--surface)', padding: '0.6rem 1rem', borderRadius: '6px', fontSize: '0.85rem' }}>
+                                                    <div>
+                                                        <strong style={{ color: evt.decision === 'KNOWN' ? '#06D6A0' : '#FFD166' }}>{evt.identity}</strong> ({evt.decision})
+                                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Camera: {evt.camera_id} | Track: #{evt.track_id}</div>
+                                                    </div>
+                                                    <div style={{ textAlign: 'right' }}>
+                                                        <div style={{ fontFamily: 'monospace', color: '#5CE1E6', fontWeight: 800 }}>{(evt.confidence * 100).toFixed(1)}% Match</div>
+                                                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>{new Date(evt.timestamp).toLocaleTimeString()}</div>
+                                                    </div>
+                                                </div>
+                                            ))}
                                         </div>
                                     </div>
-                                    <div className="case-card-right">
-                                        <div className={`status-badge ${getStatusClass(c.status)}`}>
-                                            <div className={`status-dot ${getStatusClass(c.status)}`}></div>
-                                            <span className="status-text">{c.status}</span>
+                                )}
+
+                                {filteredAndSortedCases.map((c) => (
+                                    <div
+                                        className="case-card"
+                                        key={c.id}
+                                        onClick={() => navigate(`/case/${c.id}`)}
+                                        style={{ cursor: 'pointer' }}
+                                    >
+                                        <div className="case-card-left">
+                                            <div className="case-avatar">
+                                                <UserIcon size={48} />
+                                            </div>
+                                            <div className="case-details">
+                                                <span>Case id : {c.id}</span>
+                                                <span>Case Name : {c.name}</span>
+                                            </div>
                                         </div>
-                                        <button 
-                                            className="more-btn"
-                                            onClick={(e) => {
-                                                e.stopPropagation();
-                                                navigate(`/case/${c.id}`);
-                                            }}
-                                        >
-                                            <MoreHorizontal size={24} />
-                                        </button>
+                                        <div className="case-card-right">
+                                            <div className={`status-badge ${getStatusClass(c.status)}`}>
+                                                <div className={`status-dot ${getStatusClass(c.status)}`}></div>
+                                                <span className="status-text">{c.status}</span>
+                                            </div>
+                                            <button
+                                                className="more-btn"
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    navigate(`/case/${c.id}`);
+                                                }}
+                                            >
+                                                <MoreHorizontal size={24} />
+                                            </button>
+                                        </div>
                                     </div>
-                                </div>
-                            ))
+                                ))}
+                            </>
                         )}
                     </div>
                 </div>
